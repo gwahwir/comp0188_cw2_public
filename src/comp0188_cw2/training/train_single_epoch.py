@@ -1,5 +1,7 @@
 
 import torch
+from sklearn.metrics import accuracy_score, mean_squared_error
+import numpy as np
 from typing import Dict, Tuple
 import logging
 from tqdm import tqdm
@@ -68,8 +70,16 @@ class TrainSingleEpoch:
             losses = losses.half()
             denom = denom.half()
         model.train()
-        
+
+        #addition to calculate RMSE and accuracy
+        all_grp_pred = []
+        all_grp_true = []
+        all_pos_pred = []
+        all_pos_true = []
+        #addition to calculate RMSE and accuracy
+            
         preds = []
+            
         range_gen = tqdm(
             enumerate(data_loader),
             total=len(data_loader)
@@ -98,9 +108,27 @@ class TrainSingleEpoch:
                 with torch.autocast(device_type=_device):
                         output = model(**input_vals)
                         train_loss = criterion(output, output_vals)
+            
             else:
                 output = model(**input_vals)
                 train_loss = criterion(output, output_vals)
+                
+            #addition to calculate RMSE and accuracy
+             # --- Metric Calculation ---
+            grp_pred = torch.argmax(output['grp'], dim=1)  # Get predicted class labels
+            grp_true = torch.argmax(output_vals['actions'][:, 3:], dim=1).long()  # Get true class labels
+            pos_pred = output['pos']  # Get predicted coordinates
+            pos_true = output_vals['actions'][:, :3]  # Get true coordinates
+            # --- End Metric Calculation ---
+
+            # Accumulate predictions and ground truth
+            all_grp_pred.extend(grp_pred.cpu().numpy())
+            all_grp_true.extend(grp_true.cpu().numpy())
+            all_pos_pred.extend(pos_pred.cpu().detach().numpy())
+            all_pos_true.extend(pos_true.cpu().detach().numpy())
+            #addition to calculate RMSE and accuracy
+
+            
             if self.cache_preds:
                 preds.append({k:output[k].detach().cpu() for k in output.keys()})
             losses += train_loss.detach().cpu()
@@ -111,14 +139,28 @@ class TrainSingleEpoch:
             try:
                 # compute gradient and do SGD step
                 train_loss.backward()
-
                 optimizer.step()
             except RuntimeError as e:
                 logger.debug("Runtime error on training instance: {}".format(i))
+        
                 raise e
+                
+        #addition to calculate RMSE and accuracy
+        # Calculate metrics after epoch
+        acc = accuracy_score(all_grp_true, all_grp_pred)
+        rmse = np.sqrt(mean_squared_error(all_pos_true, all_pos_pred))
+        #addition to calculate RMSE and accuracy
+            
         _prd_lst = {}
         if self.cache_preds:
             for k in preds[0].keys():
                 _prd_lst[k] = torch.concat([t[k] for t in preds],dim=0)
+                
+        #addition to calculate RMSE and accuracy
+        metrics = {'accuracy': acc, 'rmse': rmse} 
+        #addition to calculate RMSE and accuracy
+
+            
         losses = losses/denom
-        return losses, _prd_lst
+            
+        return losses, _prd_lst, metrics
