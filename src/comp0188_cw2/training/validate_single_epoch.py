@@ -60,6 +60,14 @@ class ValidateSingleEpoch:
             losses = losses.half()
             denom = denom.half()
         model.eval()
+
+        #addition to calculate RMSE and accuracy
+        all_grp_pred = []
+        all_grp_true = []
+        all_pos_pred = []
+        all_pos_true = []
+        #addition to calculate RMSE and accuracy
+            
         preds = []
         with torch.no_grad():
             for i, vals in enumerate(data_loader):
@@ -89,15 +97,39 @@ class ValidateSingleEpoch:
                 else:
                     output = model(**input_vals)
 
+                #addition to calculate RMSE and accuracy
+                # --- Metric Calculation ---
+                grp_pred = torch.argmax(output['grp'], dim=1)  # Get predicted class labels
+                grp_true = torch.argmax(output_vals['actions'][:, 3:], dim=1).long()  # Get true class labels
+                pos_pred = output['pos']  # Get predicted coordinates
+                pos_true = output_vals['actions'][:, :3]  # Get true coordinates
+                # --- End Metric Calculation ---
+                # Accumulate predictions and ground truth
+                all_grp_pred.extend(grp_pred.cpu().numpy())
+                all_grp_true.extend(grp_true.cpu().numpy())
+                all_pos_pred.extend(pos_pred.cpu().detach().numpy())
+                all_pos_true.extend(pos_true.cpu().detach().numpy())
+                #addition to calculate RMSE and accuracy
+
                 # Logs
                 val_loss = criterion(output, output_vals)
                 losses += val_loss.detach().cpu()
                 denom += 1
                 if self.cache_preds:
                     preds.append({k:output[k].detach().cpu() for k in output.keys()})
+        #addition to calculate RMSE and accuracy
+        # Calculate metrics after epoch
+        acc = accuracy_score(all_grp_true, all_grp_pred)
+        rmse = np.sqrt(mean_squared_error(all_pos_true, all_pos_pred))
+        #addition to calculate RMSE and accuracy
         _prd_lst = {}
         if self.cache_preds:
             for k in preds[0].keys():
                 _prd_lst[k] = torch.concat([t[k] for t in preds],dim=0)
+
+        #addition to calculate RMSE and accuracy
+        metrics = {'accuracy': acc, 'rmse': rmse} 
+        #addition to calculate RMSE and accuracy
+            
         losses = losses/denom
-        return losses, _prd_lst
+        return losses, _prd_lst, metrics
